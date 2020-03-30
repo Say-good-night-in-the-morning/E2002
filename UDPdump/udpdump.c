@@ -274,9 +274,11 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 		dport);*/
 	u_char(*pft)[4] = NULL;
 	u_char* ph = NULL;
-	if (ih->daddr[0] == 192 && ih->daddr[1] == 168 && ih->daddr[2] == 1 && ih->daddr[3] == 109) {
-		pft = srcadd;
+	int req=-1;
+	if (ih->daddr[0] == 192 && ih->daddr[1] == 168 && ih->daddr[2] == 1 && ih->daddr[3] == 108) {
+		pft = &srcadd;
 		ph = ih->saddr;
+		req = 0;
 		for (int i = 0; i < 100; i++) {
 			if (0 == pft[i][0] && 0 == pft[i][1] && 0 == pft[i][2] && 0 == pft[i][3]) {
 				pft[i][0] = ph[0];
@@ -292,9 +294,11 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 			}
 		}
 	}
-	else if (ih->saddr[0] == 192 && ih->saddr[1] == 168 && ih->saddr[2] == 1 && ih->saddr[3] == 109) {
+	else if (ih->saddr[0] == 192 && ih->saddr[1] == 168 && ih->saddr[2] == 1 && ih->saddr[3] == 108) {
 		pft = &dstadd;
 		ph = ih->daddr;
+		req = 1;
+
 		for (int i = 0; i < 100; i++) {
 			if (0 == pft[i][0] && 0 == pft[i][1] && 0 == pft[i][2] && 0 == pft[i][3]) {
 				pft[i][0] = ph[0];
@@ -353,15 +357,76 @@ void packet_handler(u_char *param, const struct pcap_pkthdr *header, const u_cha
 	char deid[16];
 	sprintf(deid, "%d.%d.%d.%d", ih->daddr[0], ih->daddr[1], ih->daddr[2], ih->daddr[3]);
 
-	sprintf(Buff, "%s,%s,%s,%s,%s,%d\n", timestr,sradd,srid,deadd,deid, ntohs(ih->tlen));
+	static char user[100][20] = { 0 };
+	static char pass[100][20] = { 0 };
+	static char dead[100][20] = { 0 };
+	static int sta[100] = { 0 };
+	static int countuser = 0;
+	
 	printf("%s", Buff);
+	char cop[100] = { 0 };
 	//fwrite(&Buff, sizeof(Buff), 1, fp);
+	char* p = cop;
 	for (int i = 55; (i < header->caplen + 1); i++)
 	{
-		//printf("%.2x ", pkt_data[i-1]);
-		printf("%c", pkt_data[i - 1]);
+		*p++ = pkt_data[i - 1];
+	}
+	int f = 0;
+	static int passget = 0;
+	if (req == 1) {
+		sprintf(dead[0], "%d.%d.%d.%d", ih->daddr[0], ih->daddr[1], ih->daddr[2], ih->daddr[3]);
+		if (cop[0] == 'U'&&cop[1] == 'S'&&cop[2] == 'E'&&cop[3] == 'R') {
+			passget++;
+			int tx = 0;
+			for (; cop[tx] != 0x20; tx++);
+			int ctx = tx+1;
+			for (tx+=1; cop[tx] != 0x0d && cop[tx + 1] != 0x0a; tx++) {
+				user[countuser][tx - ctx] = cop[tx];
+			}
+			user[countuser][tx - ctx] = '\0';
+			printf("\n\033[42m%s\033[0m\n", user[countuser]);
+		}
+		if (cop[0] == 'P'&&cop[1] == 'A'&&cop[2] == 'S'&&cop[3] == 'S') {
+			passget++;
+			int tx = 0;
+			for (; cop[tx] != 0x20; tx++);
+			int ctx = tx + 1;
+			for (tx += 1; cop[tx] != 0x0d && cop[tx + 1] != 0x0a; tx++) {
+				pass[countuser][tx - ctx] = cop[tx];
+			}
+			pass[countuser][tx - ctx] = '\0';
+			printf("\n\033[42m%s\033[0m\n", pass[countuser]);
+		}
+	}
+	else if (req == 0) {
+		if (cop[0] == '3'&&cop[1] == '3'&&cop[2] == '1'&&passget == 1) {
+			passget++;
+		}
+		if (cop[0] == '5'&&cop[1] == '3'&&cop[2] == '0'&&passget == 3) {
+			passget++;
+			sta[countuser] = 0;
+			printf("\n\033[42m%d\033[0m\n", sta[countuser]);
+			printf("\n\033[41mFTP:%s\tUSER:%s\tPAS:%s\tSTA:%s\033[0m\n", dead[countuser], user[countuser], pass[countuser],
+				sta[countuser] == 1 ? "OK" : "FAILED");
+			sprintf(Buff,"FTP:,%s,USER:%s,PAS:%s,STA:%s\n", dead[countuser], user[countuser], pass[countuser],
+				sta[countuser] == 1 ? "OK" : "FAILED");
+			fwrite(Buff, 1, sizeof(Buff), fp);
+		}
+		if (cop[0] == '2'&&cop[1] == '3'&&cop[2] == '0'&&passget == 3) {
+			passget++;
+			sta[countuser] = 1;
+			printf("\n\033[42m%d\033[0m\n", sta[countuser]);
+			printf("\n\033[44mFTP:%s\tUSER:%s\tPAS:%s\tSTA:%s\033[0m\n", dead[countuser], user[countuser], pass[countuser],
+				sta[countuser] == 1 ? "OK" : "FAILED");
+			sprintf(Buff, "FTP:,%s,USER:%s,PAS:%s,STA:%s\n", dead[countuser], user[countuser], pass[countuser],
+				sta[countuser] == 1 ? "OK" : "FAILED");
+			fwrite(Buff, 1, sizeof(Buff), fp);
+		}
 	}
 
+	if (passget == 4) {
+		passget = 0;
+	}
 
 	//if (stop(sec, min) == 1) {
 	//	for (int i = 0; i < 100; i++) {
